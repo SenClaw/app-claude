@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Code</title>
+<style>
+  :root { --bg:#ffffff; --fg:#1f2328; --muted:#656d76; --card:#f6f8fa; --border:#d0d7de; --accent:#0969da;
+          --ok:#1a7f37; --warn:#9a6700; --bad:#cf222e; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0d1117; --fg:#e6edf3; --muted:#8d96a0; --card:#161b22; --border:#30363d; --accent:#4493f8;
+            --ok:#3fb950; --warn:#d29922; --bad:#f85149; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--fg);
+         font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+  h1 { font-size:18px; margin:0 0 12px; }
+  section { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:12px 14px; margin-bottom:14px; }
+  h2 { font-size:14px; margin:0 0 8px; }
+  .muted { color:var(--muted); font-size:12px; }
+  .badge { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; border:1px solid currentColor; }
+  .ok { color:var(--ok); } .warn { color:var(--warn); } .bad { color:var(--bad); }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; }
+  pre { background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:8px; white-space:pre-wrap; word-break:break-all; margin:6px 0; }
+  label { display:block; font-weight:600; margin:10px 0 4px; }
+  input[type=text], input[type=number], select { width:100%; max-width:420px; padding:6px 8px; border:1px solid var(--border);
+         border-radius:6px; background:var(--bg); color:var(--fg); }
+  .row { display:flex; gap:16px; flex-wrap:wrap; }
+  .row > div { min-width:140px; }
+  button { padding:6px 14px; border-radius:6px; border:1px solid var(--accent); background:var(--accent); color:#fff; cursor:pointer; margin-top:12px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--border); vertical-align:top; }
+  .scroll { overflow-x:auto; }
+</style>
+</head>
+<body>
+<h1>🤖 Claude Code</h1>
+
+<section id="status"><h2>Trạng thái</h2><div class="muted">Đang tải…</div></section>
+
+<section>
+  <h2>Ranh giới tin cậy</h2>
+  <div class="muted">Worker chạy với quyền của bạn, dùng các công cụ được phép (mặc định có Bash). Worktree git chỉ bảo vệ
+  bản checkout của bạn, không bảo vệ cả máy. Chỉ để thẻ bạn tin tưởng vào Ready.</div>
+</section>
+
+<section>
+  <h2>Kết nối Claude Code với SenClaw (MCP)</h2>
+  <div class="muted">Chạy một lần trong terminal. <code>SENCLAW_TOKEN</code> là API token của daemon (<code>~/.senclaw/api_token</code>).</div>
+  <div id="mcp"></div>
+</section>
+
+<section>
+  <h2>Cài đặt worker</h2>
+  <form id="form">
+    <label>Lệnh kiểm chứng</label>
+    <input type="text" name="verifyCommand" placeholder="cargo test">
+    <div class="muted">Phải thoát với mã 0 thì thẻ mới đóng. Không bao giờ đọc từ nội dung thẻ. Không có lệnh này và không có diff worktree để review thì thẻ chờ người duyệt.</div>
+    <label>Chế độ quyền</label>
+    <select name="permissionMode">
+      <option>acceptEdits</option><option>default</option><option>plan</option><option>auto</option><option>dontAsk</option><option>bypassPermissions</option>
+    </select>
+    <label>Công cụ được phép (phân cách bằng dấu phẩy)</label>
+    <input type="text" name="allowedTools">
+    <div class="row">
+      <div><label>Số lượt tối đa</label><input type="number" name="maxTurns" min="1"></div>
+      <div><label>Số vòng sửa</label><input type="number" name="maxFixRounds" min="0" max="10"></div>
+      <div><label>Stop hook bắt làm lại</label><input type="number" name="maxStopBlocks" min="0" max="10"></div>
+      <div><label>Timeout kiểm chứng (giây)</label><input type="number" name="verifyTimeoutSecs" min="1"></div>
+    </div>
+    <label><input type="checkbox" name="review"> Review diff trước khi đóng thẻ</label>
+    <div class="row">
+      <div><label>Model</label><input type="text" name="model" placeholder="mặc định của Claude Code"></div>
+      <div><label>Tệp thực thi</label><input type="text" name="binary"></div>
+    </div>
+    <button type="submit">Lưu</button> <span id="saved" class="muted"></span>
+  </form>
+</section>
+
+<section>
+  <h2>Các lượt chạy</h2>
+  <div class="scroll" id="runs"><div class="muted">Chưa có lượt chạy nào.</div></div>
+</section>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+let current = null;
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.error || ('HTTP ' + r.status));
+  return body;
+}
+
+async function loadStatus() {
+  try {
+    const s = await api('api/status');
+    $('#status').innerHTML = '<h2>Trạng thái</h2>' + (s.installed
+      ? `<span class="badge ok">đã tìm thấy</span> ${esc(s.binary)} — ${esc(s.version)}<div class="muted">Giao thẻ kanban cho <code>claude-code</code> rồi chuyển sang Ready: Claude Code làm việc, SenClaw kiểm chứng trước khi đóng thẻ.</div>`
+      : `<span class="badge warn">chưa chạy được</span> <code>${esc(s.binary)}</code><div class="muted">Cài Claude Code và đăng nhập bằng cách chạy <code>claude</code> một lần, hoặc đặt đường dẫn tệp thực thi bên dưới.</div>`);
+    $('#mcp').innerHTML = s.mcp.addCommands.map((c) => `<pre>${esc(c)}</pre>`).join('');
+  } catch (e) {
+    $('#status').innerHTML = `<h2>Trạng thái</h2><span class="badge bad">lỗi</span> ${esc(e.message)}`;
+  }
+}
+
+async function loadSettings() {
+  current = await api('api/settings');
+  const f = $('#form');
+  for (const el of f.elements) {
+    if (!el.name) continue;
+    const v = current[el.name];
+    if (el.type === 'checkbox') el.checked = !!v;
+    else if (el.name === 'allowedTools') el.value = (v || []).join(', ');
+    else el.value = v ?? '';
+  }
+}
+
+$('#form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const f = ev.target, next = { ...current };
+  for (const el of f.elements) {
+    if (!el.name) continue;
+    if (el.type === 'checkbox') next[el.name] = el.checked;
+    else if (el.type === 'number') next[el.name] = el.value === '' ? current[el.name] : Number(el.value);
+    else if (el.name === 'allowedTools') next[el.name] = el.value.split(',').map((t) => t.trim()).filter(Boolean);
+    else next[el.name] = el.value.trim() === '' && ['model', 'verifyCommand'].includes(el.name) ? null : el.value.trim();
+  }
+  try {
+    current = await api('api/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(next) });
+    $('#saved').textContent = 'Đã lưu';
+    loadStatus();
+  } catch (e) {
+    $('#saved').textContent = e.message;
+  }
+  setTimeout(() => ($('#saved').textContent = ''), 3000);
+});
+
+const PHASE = { done: 'ok', blocked: 'warn', failed: 'bad' };
+async function loadRuns() {
+  try {
+    const { runs } = await api('api/runs');
+    if (!runs.length) return;
+    $('#runs').innerHTML = '<table><tr><th>Thẻ</th><th>Giai đoạn</th><th>Vòng sửa</th><th>Hoạt động</th><th>Chi phí</th><th>Bắt đầu</th></tr>' +
+      runs.map((r) => `<tr><td>#${esc(r.itemId)}</td><td><span class="badge ${PHASE[r.phase] || ''}">${esc(r.phase)}</span></td>` +
+        `<td>${r.fixRound}</td><td>${esc(r.lastActivity)}</td><td>$${(r.costUsd || 0).toFixed(2)}</td>` +
+        `<td>${new Date(r.startedAt).toLocaleString()}</td></tr>`).join('') + '</table>';
+  } catch (_) { /* status already shows the error */ }
+}
+
+loadStatus();
+loadSettings();
+loadRuns();
+setInterval(loadRuns, 5000);
+</script>
+</body>
+</html>

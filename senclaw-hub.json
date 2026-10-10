@@ -1,0 +1,11 @@
+{
+  "version": "0.1.0",
+  "category": "app",
+  "keywords": ["claude", "claude-code", "coding", "kanban", "worker"],
+  "permissions": {
+    "network": ["127.0.0.1"],
+    "exec": ["./app-claude", "claude", "git", "sh"]
+  },
+  "updater": "none",
+  "repo_url": "https://github.com/SenClaw/app-claude"
+}

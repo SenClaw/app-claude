@@ -1,0 +1,20 @@
+{
+  "id": "claude",
+  "name": "Claude Code",
+  "description": "Chạy thẻ kanban giao cho \"claude-code\" bằng Claude Code (CLI `claude` đã đăng nhập của chính bạn) trong worktree riêng của thẻ, rồi KIỂM CHỨNG trước khi đóng thẻ: Stop hook bắt chạy lệnh kiểm chứng, chạy lại lệnh kiểm chứng độc lập, một phiên review chỉ-đọc trên diff, và các vòng sửa (--resume). App chạy nền; SenClaw giao thẻ cho app qua giao thức app-worker. Worker chạy bằng quyền của bạn — chỉ để thẻ bạn tin tưởng vào Ready.",
+  "icon": "🤖",
+  "runtime": {
+    "kind": "server",
+    "mode": "background",
+    "start": "./app-claude",
+    "healthPath": "/health",
+    "port": 4810
+  },
+  "integration": {
+    "type": "iframe",
+    "url": "/"
+  },
+  "workers": [
+    { "assignee": "claude-code", "aliases": ["claude"], "path": "/api/worker" }
+  ]
+}
